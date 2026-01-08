@@ -93,4 +93,20 @@ fn set_config_from_features(config: &mut OpenThreadConfig) {
     if cfg!(feature = "full-thread-device") {
         config.ftd(true);
     }
+
+    if cfg!(feature = "dnssd-server") {
+        config.dnssd_server(true);
+    }
+
+    if cfg!(feature = "dns-client") {
+        config.dns_client(true);
+    }
+
+    if cfg!(feature = "service") {
+        config.service(true);
+    }
+
+    if cfg!(feature = "srp-server") {
+        config.srp_server(true);
+    }
 }

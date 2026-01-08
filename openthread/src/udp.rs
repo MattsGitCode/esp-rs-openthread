@@ -65,6 +65,28 @@ impl<'a> UdpSocket<'a> {
         Ok(this)
     }
 
+    // pub async fn connect_dns(ot: OpenThread<'a>, remote_service: &str) -> Result<Self, OtError> {
+    //     let target = dns_client_resolve_service_and_host_address().await;
+
+    //     let this = Self::new(ot)?;
+
+    //     {
+    //         let mut ot = this.ot.activate();
+    //         let state = ot.state();
+    //         let _ = state.udp()?;
+
+    //         unsafe {
+    //             otUdpConnect(
+    //                 state.ot.instance,
+    //                 &mut state.udp()?.sockets[this.slot].ot_socket,
+    //                 &to_ot_addr(remote),
+    //             );
+    //         }
+    //     }
+
+    //     Ok(this)
+    // }
+
     /// Create a new unbound and unconnected UDP socket.
     fn new(ot: OpenThread<'a>) -> Result<Self, OtError> {
         let slot = {

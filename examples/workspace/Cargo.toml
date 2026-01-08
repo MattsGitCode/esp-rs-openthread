@@ -1,0 +1,10 @@
+[workspace]
+resolver = "3"
+members = [
+    "ftd",
+    "non-default-mtd",
+]
+
+
+[patch.crates-io]
+openthread = { path="../../openthread" }

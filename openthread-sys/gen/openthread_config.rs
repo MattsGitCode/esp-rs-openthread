@@ -30,6 +30,14 @@ impl OpenThreadConfig {
         self.set_boolean("OT_BORDER_ROUTING", enable);
     }
 
+    pub fn dns_client(&mut self, enable: bool) {
+        self.set_boolean("OT_DNS_CLIENT", enable);
+    }
+
+    pub fn dnssd_server(&mut self, enable: bool) {
+        self.set_boolean("OT_DNSSD_SERVER", enable);
+    }
+
     pub fn ecdsa(&mut self, enable: bool) {
         self.set_boolean("OT_ECDSA", enable);
     }
@@ -88,6 +96,10 @@ impl OpenThreadConfig {
         self.set_boolean("OT_RCP", enable);
     }
 
+    pub fn service(&mut self, enable: bool) {
+        self.set_boolean("OT_SERVICE", enable);
+    }
+
     fn settings_ram(&mut self, enable: bool) {
         self.set_boolean("OT_SETTINGS_RAM", enable);
     }
@@ -98,6 +110,10 @@ impl OpenThreadConfig {
 
     pub fn srp_client(&mut self, enable: bool) {
         self.set_boolean("OT_SRP_CLIENT", enable);
+    }
+
+    pub fn srp_server(&mut self, enable: bool) {
+        self.set_boolean("OT_SRP_SERVER", enable);
     }
 
     pub fn tcp(&mut self, enable: bool) {

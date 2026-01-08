@@ -19,8 +19,20 @@ force-generate-bindings = []
 # If this feature is not enabled, the build will assume and use the "official" RiscV GCC toolchain:
 # https://github.com/riscv-collab/riscv-gnu-toolchain
 force-esp-riscv-toolchain = []
+
+# Enable the OT_SRP_SERVER OpenThread build flag
+dnssd-server = ["srp-server"]
+# Enable the OT_DNS_CLIENT OpenThread build flag, and expose safe wrappers
+dns-client = []
 # Build the OpenThread library in Full Thread Device (FTD) mode
 full-thread-device = []
+# Enable the OT_SERVICE OpenThread build flag
+service = []
+# Enable the OT_SRP_SERVER OpenThread build flag
+srp-server = ["service"]
+
+non-volatile-storage = []
+
 
 [build-dependencies]
 anyhow = "1"

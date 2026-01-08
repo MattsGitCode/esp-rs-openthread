@@ -5,6 +5,9 @@
 #![allow(async_fn_in_trait)]
 #![allow(clippy::uninlined_format_args)]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 use core::cell::{RefCell, RefMut};
 use core::ffi::c_void;
 use core::future::poll_fn;
@@ -28,6 +31,8 @@ use signal::Signal;
 pub use rand_core::RngCore as OtRngCore;
 
 pub use dataset::*;
+#[cfg(feature = "dns-client")]
+pub use dns_client::*;
 pub use fmt::Bytes as BytesFmt;
 pub use nat64::*;
 pub use netdata::*;
@@ -35,7 +40,8 @@ pub use openthread_sys as sys;
 pub use radio::*;
 pub use scan::*;
 pub use settings::*;
-#[cfg(feature = "srp")]
+// TODO: Separate srp-client from srp-server
+#[cfg(feature = "srp-client")]
 pub use srp::*;
 #[cfg(feature = "udp")]
 pub use udp::*;
@@ -44,6 +50,8 @@ pub use udp::*;
 pub(crate) mod fmt;
 
 mod dataset;
+#[cfg(feature = "dns-client")]
+mod dns_client;
 #[cfg(all(feature = "edge-nal", feature = "udp"))]
 pub mod enal;
 #[cfg(feature = "embassy-net-driver-channel")]
@@ -59,13 +67,14 @@ mod radio;
 mod scan;
 mod settings;
 mod signal;
-#[cfg(feature = "srp")]
+// TODO: Separate srp-client from srp-server
+#[cfg(feature = "srp-client")]
 mod srp;
 #[cfg(feature = "udp")]
 mod udp;
 
 use sys::{
-    otChangedFlags, otDeviceRole, otDeviceRole_OT_DEVICE_ROLE_CHILD,
+    otChangedFlags, otDatasetIsCommissioned, otDeviceRole, otDeviceRole_OT_DEVICE_ROLE_CHILD,
     otDeviceRole_OT_DEVICE_ROLE_DETACHED, otDeviceRole_OT_DEVICE_ROLE_DISABLED,
     otDeviceRole_OT_DEVICE_ROLE_LEADER, otDeviceRole_OT_DEVICE_ROLE_ROUTER, otError,
     otError_OT_ERROR_ABORT, otError_OT_ERROR_CHANNEL_ACCESS_FAILURE, otError_OT_ERROR_DROP,
@@ -76,8 +85,8 @@ use sys::{
     otMessagePriority_OT_MESSAGE_PRIORITY_NORMAL, otMessageRead, otMessageSettings,
     otOperationalDataset, otOperationalDatasetTlvs, otPlatAlarmMilliFired, otPlatRadioReceiveDone,
     otPlatRadioTxDone, otPlatRadioTxStarted, otRadioCaps, otRadioFrame, otSetStateChangedCallback,
-    otTaskletsProcess, otThreadGetDeviceRole, otThreadGetExtendedPanId, otThreadSetEnabled,
-    OT_RADIO_CAPS_ACK_TIMEOUT, OT_RADIO_FRAME_MAX_SIZE,
+    otTaskletsProcess, otThreadDetachGracefully, otThreadGetDeviceRole, otThreadGetExtendedPanId,
+    otThreadSetEnabled, OT_RADIO_CAPS_ACK_TIMEOUT, OT_RADIO_FRAME_MAX_SIZE,
 };
 
 /// A newtype wrapper over the native OpenThread error type (`otError`).
@@ -139,7 +148,7 @@ pub struct OpenThread<'a> {
     state: &'a RefCell<OtState<'a>>,
     #[cfg(feature = "udp")]
     udp_state: Option<&'a RefCell<OtUdpState<'a>>>,
-    #[cfg(feature = "srp")]
+    #[cfg(feature = "srp-client")]
     srp_state: Option<&'a RefCell<OtSrpState<'a>>>,
 }
 
@@ -187,7 +196,7 @@ impl<'a> OpenThread<'a> {
             state,
             #[cfg(feature = "udp")]
             udp_state: None,
-            #[cfg(feature = "srp")]
+            #[cfg(feature = "srp-client")]
             srp_state: None,
         };
 
@@ -239,7 +248,7 @@ impl<'a> OpenThread<'a> {
         let mut this = Self {
             state,
             udp_state: Some(udp_state),
-            #[cfg(feature = "srp")]
+            #[cfg(feature = "srp-client")]
             srp_state: None,
         };
 
@@ -258,7 +267,7 @@ impl<'a> OpenThread<'a> {
     ///
     /// Returns:
     /// - In case there were no errors related to initializing the OpenThread library, the OpenThread instance.
-    #[cfg(feature = "srp")]
+    #[cfg(feature = "srp-client")]
     pub fn new_with_srp<const SRP_SVCS: usize, const SRP_BUF_SZ: usize>(
         ieee_eui64: [u8; 8],
         rng: &'a mut dyn OtRngCore,
@@ -311,7 +320,7 @@ impl<'a> OpenThread<'a> {
     ///
     /// Returns:
     /// - In case there were no errors related to initializing the OpenThread library, the OpenThread instance.
-    #[cfg(all(feature = "udp", feature = "srp"))]
+    #[cfg(all(feature = "udp", feature = "srp-client"))]
     pub fn new_with_udp_srp<
         const UDP_SOCKETS: usize,
         const UDP_RX_SZ: usize,
@@ -424,6 +433,20 @@ impl<'a> OpenThread<'a> {
         let state = ot.state();
 
         ot!(unsafe { otThreadSetEnabled(state.ot.instance, enable) })
+    }
+
+    pub fn detach_gracefully(&self) -> Result<(), OtError> {
+        // impl Future<Output = Result<(), OtError>> {
+        let mut ot = self.activate();
+        let state = ot.state();
+
+        ot!(unsafe {
+            otThreadDetachGracefully(
+                state.ot.instance,
+                Some(OtContext::plat_c_thread_detach_gracefully_callback),
+                state.ot.instance as *mut _,
+            )
+        })
     }
 
     /// Gets the list of IPv6 addresses currently assigned to the Thread interface
@@ -590,7 +613,7 @@ impl<'a> OpenThread<'a> {
                 )
             }
 
-            #[cfg(feature = "srp")]
+            #[cfg(feature = "srp-client")]
             unsafe {
                 crate::sys::otSrpClientSetCallback(
                     state.ot.instance,
@@ -702,6 +725,8 @@ impl<'a> OpenThread<'a> {
 
         let radio_cmd = || poll_fn(move |cx| self.activate().state().ot.radio.poll_wait(cx));
 
+        let mut current_config = Config::new();
+
         loop {
             trace!("Waiting for radio command");
 
@@ -713,7 +738,14 @@ impl<'a> OpenThread<'a> {
             let mut ack_psdu_buf = [0_u8; OT_RADIO_FRAME_MAX_SIZE as usize];
 
             loop {
-                unwrap!(radio.set_config(cmd.conf()).await);
+                let new_config = cmd.conf();
+                if &current_config != new_config {
+                    trace!("Radio config changed, setting now...");
+                    unwrap!(radio.set_config(cmd.conf()).await);
+                    current_config = new_config.clone();
+                } else {
+                    trace!("Radio config did not change, skipping set");
+                }
 
                 match cmd {
                     RadioCommand::Tx(_) => {
@@ -934,6 +966,17 @@ impl<'a> OpenThread<'a> {
             _ => otError_OT_ERROR_ABORT,
         }
     }
+
+    pub fn is_commissioned(&self) -> bool {
+        let mut ot = self.activate();
+        let state = ot.state();
+        unsafe { otDatasetIsCommissioned(state.ot.instance) }
+    }
+
+    #[cfg(feature = "dns-client")]
+    pub fn dns(&self) -> DnsClient<'a> {
+        DnsClient::new(self.clone())
+    }
 }
 
 impl Drop for OpenThread<'_> {
@@ -962,7 +1005,7 @@ impl Clone for OpenThread<'_> {
             state: self.state,
             #[cfg(feature = "udp")]
             udp_state: self.udp_state,
-            #[cfg(feature = "srp")]
+            #[cfg(feature = "srp-client")]
             srp_state: self.srp_state,
         }
     }
@@ -1118,7 +1161,7 @@ struct OtActiveState<'a> {
     #[cfg(feature = "udp")]
     udp: Option<RefMut<'a, OtUdpState<'a>>>,
     /// The activated `OtSrpState` instance.
-    #[cfg(feature = "srp")]
+    #[cfg(feature = "srp-client")]
     srp: Option<RefMut<'a, OtSrpState<'a>>>,
 }
 
@@ -1142,7 +1185,7 @@ impl<'a> OtActiveState<'a> {
     ///
     /// This method will return an error if the `OpenThread` instance was not
     /// initialized with SRP resources.
-    #[cfg(feature = "srp")]
+    #[cfg(feature = "srp-client")]
     pub(crate) fn srp(&mut self) -> Result<&mut OtSrpState<'a>, OtError> {
         let srp = self
             .srp
@@ -1197,7 +1240,7 @@ impl<'a> OtContext<'a> {
             ot: ot.state.borrow_mut(),
             #[cfg(feature = "udp")]
             udp: ot.udp_state.map(|u| u.borrow_mut()),
-            #[cfg(feature = "srp")]
+            #[cfg(feature = "srp-client")]
             srp: ot.srp_state.map(|s| s.borrow_mut()),
         };
 
@@ -1290,7 +1333,13 @@ impl<'a> OtContext<'a> {
         Self::callback(instance).plat_ipv6_received(msg);
     }
 
-    #[cfg(feature = "srp")]
+    unsafe extern "C" fn plat_c_thread_detach_gracefully_callback(context: *mut c_void) {
+        let instance = context as *mut otInstance;
+
+        Self::callback(instance).plat_thread_detached_gracefully();
+    }
+
+    #[cfg(feature = "srp-client")]
     unsafe extern "C" fn plat_c_srp_state_change_callback(
         _error: otError,
         host_info: *const crate::sys::otSrpClientHostInfo,
@@ -1307,7 +1356,7 @@ impl<'a> OtContext<'a> {
         );
     }
 
-    #[cfg(feature = "srp")]
+    #[cfg(feature = "srp-client")]
     unsafe extern "C" fn plat_c_srp_auto_start_callback(
         _server_sock_addr: *const crate::sys::otSockAddr,
         context: *mut c_void,
@@ -1362,6 +1411,10 @@ impl<'a> OtContext<'a> {
         } else {
             state.ot.rx_ipv6.signal(msg);
         }
+    }
+
+    fn plat_thread_detached_gracefully(&mut self) {
+        info!("Thread detached gracefully");
     }
 
     fn plat_changed(&mut self, _flags: u32) {
@@ -1832,7 +1885,7 @@ fn to_sock_addr(addr: &otIp6Address, port: u16, netif: u32) -> SocketAddrV6 {
 }
 
 /// Convert a `SocketAddrV6` to an `otSockAddr`.
-#[cfg(any(feature = "udp", feature = "srp"))]
+#[cfg(any(feature = "udp", feature = "srp-client"))]
 fn to_ot_addr(addr: &SocketAddrV6) -> crate::sys::otSockAddr {
     crate::sys::otSockAddr {
         mAddress: otIp6Address {

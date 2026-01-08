@@ -6,6 +6,9 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::net::{Ipv6Addr, SocketAddrV6};
 
+#[cfg(feature = "srp-server")]
+use crate::sys::{otServerAddService, otSrpServerSetEnabled};
+
 use crate::signal::Signal;
 use crate::sys::{
     otDnsTxtEntry, otError_OT_ERROR_INVALID_ARGS, otError_OT_ERROR_INVALID_STATE,
@@ -894,6 +897,25 @@ impl OpenThread<'_> {
             .await;
         } else {
             core::future::pending::<()>().await;
+        }
+    }
+
+    #[cfg(feature = "srp-server")]
+    pub fn srp_server_set_enabled(&self) {
+        let mut context = self.activate();
+        let state = context.state();
+        let instance = state.ot.instance;
+
+        unsafe {
+            otSrpServerSetEnabled(instance, true);
+            let mut service_config: crate::sys::otServiceConfig = core::mem::zeroed();
+            service_config.mServiceId = 0x5d; // Standard ID for SRP
+            service_config.mEnterpriseNumber = 0x44970; // Thread Enterprise Number
+            service_config.mServerConfig.set_mStable(true);
+            service_config.mServerConfig.mServerDataLength = 1;
+            service_config.mServerConfig.mServerData[0] = 0x01; // Data identifying this as a base SRP server
+            otServerAddService(instance, &service_config);
+            crate::sys::otServerRegister(instance);
         }
     }
 }

@@ -14,7 +14,14 @@
 
 #include "openthread/srp_client_buffers.h"
 #include "openthread/srp_client.h"
+#include "openthread/dns_client.h"
+#include "openthread/srp_server.h"
+#include "openthread/dnssd_server.h"
+#include "openthread/server.h"
 
 #ifndef OPENTHREAD_CONFIG_SRP_CLIENT_AUTO_START_API_ENABLE
 #define OPENTHREAD_CONFIG_SRP_CLIENT_AUTO_START_API_ENABLE 1
 #endif
+
+
+// #define OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS 128
